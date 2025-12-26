@@ -15,49 +15,56 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Set Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_15.4.app  # ← THIS PATH IS WRONG
+      - name: Select Available Xcode Version
+        # This uses a version that is guaranteed to exist on GitHub's 'macos-latest' runner.
+        run: sudo xcode-select -s /Applications/Xcode_15.3.app
 
-      - name: Build app (Release, unsigned)
+      - name: Create ExportOptions.plist for Unsigned Build
+        # This configuration file tells xcodebuild NOT to sign the app.
         run: |
-          xcodebuild build \
+          cat > ExportOptions.plist << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>compileBitcode</key>
+            <false/>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>signingCertificate</key>
+            <string></string>
+            <key>provisioningProfiles</key>
+            <dict/>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <false/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Build Archive & Export Unsigned IPA
+        run: |
+          # 1. Build and archive the app without any signing
+          xcodebuild archive \
             -project "Jellycuts.xcodeproj" \
             -scheme "Jellycuts" \
             -configuration Release \
-            -destination 'generic/platform=iOS' \
+            -archivePath "${{ runner.workspace }}/Jellycuts.xcarchive" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            DEVELOPMENT_TEAM="" \
-            -derivedDataPath "${{ runner.workspace }}/DerivedData"
+            CODE_SIGNING_ALLOWED=NO
 
-      - name: Create IPA from app bundle
-        run: |
-          # 1. Find det compilede .app-bundle
-          APP_PATH=$(find "${{ runner.workspace }}/DerivedData/Build/Products" -name "*.app" -type d | head -1)
-          
-          if [ -z "$APP_PATH" ]; then
-            echo "Error: Could not find .app bundle!"
-            exit 1
-          fi
+          # 2. Export the archive to an IPA using the unsigned options
+          xcodebuild -exportArchive \
+            -archivePath "${{ runner.workspace }}/Jellycuts.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "${{ runner.workspace }}" \
+            -allowProvisioningUpdates
 
-          echo "Found app at: $APP_PATH"
-          
-          # 2. Opret en midlertidig Payload-mappe
-          IPA_DIR="${{ runner.workspace }}/ipa"
-          mkdir -p "$IPA_DIR/Payload"
-          
-          # 3. Kopier .app-bundlet til Payload/
-          cp -R "$APP_PATH" "$IPA_DIR/Payload/"
-          
-          # 4. Gå ind i mappen og zip den
-          cd "$IPA_DIR"
-          zip -qr "Jellycuts.ipa" "Payload"
-          
-          # 5. Flyt den færdige .ipa til en central sti
-          mv "Jellycuts.ipa" "${{ runner.workspace }}/"
-
-      - name: Upload IPA artifact
+      - name: Upload IPA Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellycuts-unsigned-ipa
