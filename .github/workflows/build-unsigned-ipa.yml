@@ -1,10 +1,8 @@
 name: Build Unsigned IPA
 
 on:
-  workflow_dispatch:  # Allows manual triggering from the Actions tab
+  workflow_dispatch:
   push:
-    branches: [ main ]
-  pull_request:
     branches: [ main ]
 
 jobs:
@@ -15,32 +13,60 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          submodules: recursive  # Critical for OpenJellycuts
+          submodules: recursive
 
-      - name: Select Xcode version
-        run: sudo xcode-select -s /Applications/Xcode_16.app
+      - name: Set Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
 
-      - name: Build .xcarchive (unsigned)
+      - name: Build archive
         run: |
           xcodebuild archive \
             -project "Jellycuts.xcodeproj" \
             -scheme "Jellycuts" \
-            -archivePath "${{ github.workspace }}/unsigned.xcarchive" \
-            -configuration Release \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
-        # If the project uses a .xcworkspace, replace `-project "Jellycuts.xcodeproj"` with:
-        # -workspace "Jellycuts.xcworkspace"
+            -archivePath "${{ runner.workspace }}/build/Jellycuts.xcarchive" \
+            -configuration Release
 
-      - name: Create .ipa from .xcarchive
+      - name: Export IPA
         run: |
-          cd "${{ github.workspace }}/unsigned.xcarchive/Products/Applications"
-          mv "Jellycuts.app" "Payload"
-          zip -r "${{ github.workspace }}/Jellycuts_unsigned.ipa" "Payload"
+          xcodebuild -exportArchive \
+            -archivePath "${{ runner.workspace }}/build/Jellycuts.xcarchive" \
+            -exportPath "${{ runner.workspace }}/build" \
+            -exportOptionsPlist "${{ runner.workspace }}/ExportOptions.plist"
 
-      - name: Upload IPA as artifact
+      - name: Create ExportOptions.plist
+        run: |
+          cat > "${{ runner.workspace }}/ExportOptions.plist" << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>compileBitcode</key>
+            <false/>
+            <key>method</key>
+            <string>development</string>
+            <key>provisioningProfiles</key>
+            <dict/>
+            <key>signingCertificate</key>
+            <string></string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+            <key>teamID</key>
+            <string></string>
+            <key>thinning</key>
+            <string><none></string>
+            <key>uploadBitcode</key>
+            <false/>
+            <key>uploadSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellycuts-unsigned-ipa
-          path: "${{ github.workspace }}/Jellycuts_unsigned.ipa"
+          path: ${{ runner.workspace }}/build/*.ipa
+          if-no-files-found: error
