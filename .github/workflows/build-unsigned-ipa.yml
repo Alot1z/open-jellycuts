@@ -15,34 +15,74 @@ jobs:
         with:
           submodules: recursive
 
-      - name: List Available Xcode Versions
-        # Først finder vi ud af, hvilke Xcode-versioner der faktisk er installeret
+      - name: Find and Select Available Xcode Version
+        # Dette trin finder automatisk den første tilgængelige Xcode-installation
         run: |
-          echo "=== Available Xcode versions ==="
-          ls /Applications/ | grep -i xcode
-          echo ""
-          echo "=== Current active developer directory ==="
+          echo "=== Searching for Xcode installations ==="
+          
+          # Liste over mulige Xcode-stier i prioriteret rækkefølge
+          POSSIBLE_PATHS=(
+            "/Applications/Xcode_15.4.app"
+            "/Applications/Xcode_15.3.app" 
+            "/Applications/Xcode_15.2.app"
+            "/Applications/Xcode_15.1.app"
+            "/Applications/Xcode_15.0.app"
+            "/Applications/Xcode_14.3.1.app"
+            "/Applications/Xcode_14.3.app"
+            "/Applications/Xcode_14.2.app"
+            "/Applications/Xcode_14.1.app"
+            "/Applications/Xcode_14.0.app"
+            "/Applications/Xcode.app"  # Sidste udvej: standardnavn
+          )
+          
+          SELECTED_PATH=""
+          for path in "${POSSIBLE_PATHS[@]}"; do
+            if [ -d "$path" ]; then
+              SELECTED_PATH="$path"
+              echo "✓ Found Xcode at: $path"
+              break
+            fi
+          done
+          
+          if [ -z "$SELECTED_PATH" ]; then
+            echo "❌ ERROR: No Xcode installation found!"
+            echo "Available applications in /Applications/:"
+            ls -la /Applications/
+            exit 1
+          fi
+          
+          # Vælg den fundne Xcode-version
+          echo "Selecting Xcode at: $SELECTED_PATH"
+          sudo xcode-select -s "$SELECTED_PATH"
+          
+          # Bekræft valget
+          echo "=== Active developer directory ==="
           xcode-select -p
-
-      - name: Select Xcode 15.2 (Confirmed Available)
-        # Vi bruger 15.2, som er garanteret at være på 'macos-latest' runneren
-        run: sudo xcode-select -s /Applications/Xcode_15.2.app
-
-      - name: Verify Xcode Selection
-        run: |
-          echo "Selected Xcode info:"
-          xcodebuild -version
-
-      - name: Find Project File Location
-        # Finder projektfilen, så vi kan bygge med korrekt sti
-        run: |
-          echo "=== Looking for Xcode project files ==="
-          find . -name "*.xcodeproj" -o -name "*.xcworkspace" | head -10
           echo ""
-          echo "=== Project root is likely ==="
+          echo "=== Xcode version info ==="
+          xcodebuild -version || echo "Could not get version info"
+
+      - name: Verify Project Structure
+        # Finder projektfilen og viser mappestrukturen
+        run: |
+          echo "=== Current directory ==="
           pwd
+          echo ""
+          echo "=== Directory contents ==="
+          ls -la
+          echo ""
+          echo "=== Looking for Xcode project files ==="
+          find . -name "*.xcodeproj" -o -name "*.xcworkspace" 2>/dev/null | head -10
+          echo ""
+          echo "=== Checking if Jellycuts.xcodeproj exists ==="
+          if [ -d "Jellycuts.xcodeproj" ]; then
+            echo "✓ Jellycuts.xcodeproj found in current directory"
+          else
+            echo "⚠ Jellycuts.xcodeproj NOT found in current directory"
+          fi
 
       - name: Create ExportOptions.plist for Unsigned Build
+        # Opsætning for unsigned IPA - dette løser signeringsproblemerne
         run: |
           cat > ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -66,27 +106,55 @@ jobs:
           </dict>
           </plist>
           EOF
+          
+          echo "Created ExportOptions.plist for unsigned build"
+          cat ExportOptions.plist
 
-      - name: Build Archive & Export Unsigned IPA
+      - name: Build Archive (Unsigned)
+        # Bygger arkivet uden signering
         run: |
-          # Byg og eksporter. Vi antager projektfilen er Jellycuts.xcodeproj i rodmappen
-          # Hvis find-kommandoen viser en anden sti, skal du opdatere -project parameteren her
+          echo "=== Building archive without signing ==="
+          
+          # Brug -workspace hvis .xcworkspace findes, ellers -project
+          if [ -d "Jellycuts.xcworkspace" ]; then
+            echo "Using workspace: Jellycuts.xcworkspace"
+            BUILD_CMD="-workspace Jellycuts.xcworkspace"
+          elif [ -d "Jellycuts.xcodeproj" ]; then
+            echo "Using project: Jellycuts.xcodeproj"
+            BUILD_CMD="-project Jellycuts.xcodeproj"
+          else
+            echo "❌ ERROR: No Xcode project or workspace found!"
+            exit 1
+          fi
+          
           xcodebuild archive \
-            -project "Jellycuts.xcodeproj" \
+            $BUILD_CMD \
             -scheme "Jellycuts" \
             -configuration Release \
             -archivePath "${{ runner.workspace }}/Jellycuts.xcarchive" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM=""
+          
+          echo "✓ Archive created successfully"
 
+      - name: Export IPA (Unsigned)
+        # Eksporterer til unsigned IPA
+        run: |
+          echo "=== Exporting to unsigned IPA ==="
+          
           xcodebuild -exportArchive \
             -archivePath "${{ runner.workspace }}/Jellycuts.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "${{ runner.workspace }}" \
             -allowProvisioningUpdates
+          
+          echo "✓ IPA export completed"
+          ls -la "${{ runner.workspace }}"/*.ipa 2>/dev/null || echo "No IPA files found"
 
       - name: Upload IPA Artifact
+        # Uploader den færdige IPA
         uses: actions/upload-artifact@v4
         with:
           name: Jellycuts-unsigned-ipa
