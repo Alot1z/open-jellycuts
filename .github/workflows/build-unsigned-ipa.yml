@@ -10,7 +10,7 @@ jobs:
     runs-on: macos-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository (with submodules)
         uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -18,55 +18,48 @@ jobs:
       - name: Set Xcode version
         run: sudo xcode-select -s /Applications/Xcode_15.4.app
 
-      - name: Build archive
+      - name: Build app (Release, unsigned)
         run: |
-          xcodebuild archive \
+          xcodebuild build \
             -project "Jellycuts.xcodeproj" \
             -scheme "Jellycuts" \
-            -archivePath "${{ runner.workspace }}/build/Jellycuts.xcarchive" \
-            -configuration Release
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            DEVELOPMENT_TEAM="" \
+            -derivedDataPath "${{ runner.workspace }}/DerivedData"
 
-      - name: Export IPA
+      - name: Create IPA from app bundle
         run: |
-          xcodebuild -exportArchive \
-            -archivePath "${{ runner.workspace }}/build/Jellycuts.xcarchive" \
-            -exportPath "${{ runner.workspace }}/build" \
-            -exportOptionsPlist "${{ runner.workspace }}/ExportOptions.plist"
+          # 1. Find det compilede .app-bundle
+          APP_PATH=$(find "${{ runner.workspace }}/DerivedData/Build/Products" -name "*.app" -type d | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "Error: Could not find .app bundle!"
+            exit 1
+          fi
 
-      - name: Create ExportOptions.plist
-        run: |
-          cat > "${{ runner.workspace }}/ExportOptions.plist" << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>compileBitcode</key>
-            <false/>
-            <key>method</key>
-            <string>development</string>
-            <key>provisioningProfiles</key>
-            <dict/>
-            <key>signingCertificate</key>
-            <string></string>
-            <key>signingStyle</key>
-            <string>manual</string>
-            <key>stripSwiftSymbols</key>
-            <true/>
-            <key>teamID</key>
-            <string></string>
-            <key>thinning</key>
-            <string><none></string>
-            <key>uploadBitcode</key>
-            <false/>
-            <key>uploadSymbols</key>
-            <true/>
-          </dict>
-          </plist>
-          EOF
+          echo "Found app at: $APP_PATH"
+          
+          # 2. Opret en midlertidig Payload-mappe
+          IPA_DIR="${{ runner.workspace }}/ipa"
+          mkdir -p "$IPA_DIR/Payload"
+          
+          # 3. Kopier .app-bundlet til Payload/
+          cp -R "$APP_PATH" "$IPA_DIR/Payload/"
+          
+          # 4. Gå ind i mappen og zip den
+          cd "$IPA_DIR"
+          zip -qr "Jellycuts.ipa" "Payload"
+          
+          # 5. Flyt den færdige .ipa til en central sti
+          mv "Jellycuts.ipa" "${{ runner.workspace }}/"
 
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellycuts-unsigned-ipa
-          path: ${{ runner.workspace }}/build/*.ipa
+          path: ${{ runner.workspace }}/Jellycuts.ipa
           if-no-files-found: error
