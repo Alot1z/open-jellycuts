@@ -1,0 +1,46 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:  # Allows manual triggering from the Actions tab
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive  # Critical for OpenJellycuts
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode_16.app
+
+      - name: Build .xcarchive (unsigned)
+        run: |
+          xcodebuild archive \
+            -project "Jellycuts.xcodeproj" \
+            -scheme "Jellycuts" \
+            -archivePath "${{ github.workspace }}/unsigned.xcarchive" \
+            -configuration Release \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO
+        # If the project uses a .xcworkspace, replace `-project "Jellycuts.xcodeproj"` with:
+        # -workspace "Jellycuts.xcworkspace"
+
+      - name: Create .ipa from .xcarchive
+        run: |
+          cd "${{ github.workspace }}/unsigned.xcarchive/Products/Applications"
+          mv "Jellycuts.app" "Payload"
+          zip -r "${{ github.workspace }}/Jellycuts_unsigned.ipa" "Payload"
+
+      - name: Upload IPA as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jellycuts-unsigned-ipa
+          path: "${{ github.workspace }}/Jellycuts_unsigned.ipa"
