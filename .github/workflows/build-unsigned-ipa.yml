@@ -14,13 +14,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+          path: 'open-jellycuts'  # Dette sørger for at alt klones til denne mappe
 
       - name: Select Available Xcode Version
-        # This uses a version that is guaranteed to exist on GitHub's 'macos-latest' runner.
         run: sudo xcode-select -s /Applications/Xcode_15.3.app
 
       - name: Create ExportOptions.plist for Unsigned Build
-        # This configuration file tells xcodebuild NOT to sign the app.
+        # OBS: Vi er nu i roden, så vi skal ind i 'open-jellycuts' mappen
+        working-directory: open-jellycuts
         run: |
           cat > ExportOptions.plist << EOF
           <?xml version="1.0" encoding="UTF-8"?>
@@ -46,6 +47,8 @@ jobs:
           EOF
 
       - name: Build Archive & Export Unsigned IPA
+        # Vi er nu i 'open-jellycuts' mappen
+        working-directory: open-jellycuts
         run: |
           # 1. Build and archive the app without any signing
           xcodebuild archive \
